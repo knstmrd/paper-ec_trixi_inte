@@ -22,7 +22,7 @@ If you find these results useful, please cite the article mentioned above. If yo
   title={Reproducibility repository for "Entropy-conservative high-order methods for high-enthalpy gas flows"},
   author={Oblapenko, Georgii},
   year={2024},
-  howpublished={\url{https://github.com/????}},
+  howpublished={\url{https://github.com/knstmrd/paper-ec_trixi_inte}},
   doi={?????}
 }
 ```
@@ -38,13 +38,13 @@ A framework for numerical evaluation of entropy-conservative volume fluxes in ga
 To download the code using `git`, use 
 
 ```bash
-git clone git@github.com:????
+git clone git@github.com:knstmrd/paper-ec_trixi_inte.git
 ``` 
 
 
 To instantiate the environment execute the following two commands:
 ```bash
-cd :????
+cd paper-ec_trixi_inte
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
