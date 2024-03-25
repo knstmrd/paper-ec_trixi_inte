@@ -1,6 +1,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-success.svg)](https://opensource.org/licenses/MIT)
-[![DOI](https://zenodo.org/badge/DOI/??????)](https://doi.org/??????)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10869717.svg)](https://doi.org/10.5281/zenodo.10869717)
 
 This repository contains information and code to reproduce the results presented in the article
 ```bibtex
@@ -23,7 +23,7 @@ If you find these results useful, please cite the article mentioned above. If yo
   author={Oblapenko, Georgii and Torrilhon, Manuel},
   year={2024},
   howpublished={\url{https://github.com/knstmrd/paper-ec_trixi_inte}},
-  doi={?????}
+  doi={10.5281/zenodo.10869717}
 }
 ```
 
