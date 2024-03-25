@@ -66,7 +66,12 @@ julia --project=. examples/elixir_euler_vibr_aho_cylinder.jl
 ## Authors
 
 * [Georgii Oblapenko](https://acom.rwth-aachen.de/the-lab/team-people/name:georgii_oblapenko) (Corresponding Author)
+* [Manuel Torrilhon](https://www.acom.rwth-aachen.de/the-lab/team-people/name:manuel_torrilhon)
 
 ## Disclaimer
 
 Everything is provided as is and without warranty. Use at your own risk!
+
+## Acknowledgments
+
+This work has been supported by the German Research Foundation within the research unit DFG-FOR5409. 
