@@ -6,7 +6,7 @@ This repository contains information and code to reproduce the results presented
 ```bibtex
 @online{oblapenko2024entropyconservative,
   title={Entropy-conservative high-order methods for high-enthalpy gas flows},
-  author={Oblapenko, Georgii},
+  author={Oblapenko, Georgii and Torrilhon, Manuel},
   year={2024},
   eprint={????},
   eprinttype={????},
@@ -20,7 +20,7 @@ If you find these results useful, please cite the article mentioned above. If yo
 ```bibtex
 @misc{oblapenko2024entropyconservativeRepro,
   title={Reproducibility repository for "Entropy-conservative high-order methods for high-enthalpy gas flows"},
-  author={Oblapenko, Georgii},
+  author={Oblapenko, Georgii and Torrilhon, Manuel},
   year={2024},
   howpublished={\url{https://github.com/knstmrd/paper-ec_trixi_inte}},
   doi={?????}
