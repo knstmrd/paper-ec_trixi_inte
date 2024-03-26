@@ -23,7 +23,7 @@ If you find these results useful, please cite the article mentioned above. If yo
   author={Oblapenko, Georgii and Torrilhon, Manuel},
   year={2024},
   howpublished={\url{https://github.com/knstmrd/paper-ec_trixi_inte}},
-  doi={10.5281/zenodo.10869717}
+  doi={10.5281/zenodo.10869716}
 }
 ```
 
