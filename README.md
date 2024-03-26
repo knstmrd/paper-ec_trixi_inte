@@ -13,7 +13,7 @@ This repository contains information and code to reproduce the results presented
   primaryClass={physics.flu-dyn},
   eprintclass={physics.flu-dyn},
   journal={arXiv preprint 2403.16882},
-  doi={?????}
+  doi={10.48550/arXiv.2403.16882}
 }
 ```
 If you find these results useful, please cite the article mentioned above. If you use the implementations provided here, please also cite this repository as
