@@ -8,11 +8,11 @@ This repository contains information and code to reproduce the results presented
   title={Entropy-conservative high-order methods for high-enthalpy gas flows},
   author={Oblapenko, Georgii and Torrilhon, Manuel},
   year={2024},
-  eprint={????},
-  eprinttype={????},
-  eprintclass={math.NA},
-  url={?????},
-  journal={arXiv preprint ?????},
+  eprint={2403.16882},
+  archivePrefix={arXiv},
+  primaryClass={physics.flu-dyn},
+  eprintclass={physics.flu-dyn},
+  journal={arXiv preprint 2403.16882},
   doi={?????}
 }
 ```
