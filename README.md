@@ -45,15 +45,22 @@ git clone git@github.com:knstmrd/paper-ec_trixi_inte.git
 To instantiate the environment execute the following two commands:
 ```bash
 cd paper-ec_trixi_inte
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate()'
 ```
 
-Note that the results are obtained using Julia 1.9.4.
-Thus, you might need to install the [old Julia 1.9.4 release](https://julialang.org/downloads/oldreleases/) first
+Note that the results are obtained using Julia 1.10.5 and Trixi 0.8.8.
+Thus, you might need to install the [old Julia 1.10.5 release](https://julialang.org/downloads/oldreleases/) first
 and *replace* the `julia` calls from this README with
-`/YOUR/PATH/TO/julia-1.9.4/bin/julia`
+`/YOUR/PATH/TO/julia-1.10.5/bin/julia`
 
-### Running the code
+
+### The code
+
+The implementation of the equations and necessary functions (pre-processing, computation of primitive variables,
+evaluation of fluxes, etc.) is in the `src/compressible_euler_2d_intenergy.jl` file.
+Some models for the rotational and vibrational energies are provided in the `src/internal_energy_models.jl` file.
+
+### Running the examples
 
 The scripts for the different test cases are located in the `examples` directory.
 
@@ -62,6 +69,9 @@ To execute them provide the path (if inside the `paper-ec_trixi_inte` directory)
 ```bash
 julia --project=. examples/elixir_euler_vibr_aho_cylinder.jl
 ```
+
+30x30 and 60x60 grids are possible, the grid size can be changed by changing the `Nx = ` line in the example file.
+The polynomial degree can be changed by changing the `polydeg = ` line in the example file. 
 
 ## Authors
 

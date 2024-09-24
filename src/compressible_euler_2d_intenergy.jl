@@ -11,7 +11,7 @@ using LinearAlgebra
     #! format: noindent
     
     @doc raw"""
-    CompressibleEulerEquationsVibrEnergy2D(mass, e_vibr_function, c_vibr_function, T_from_e_function;
+    CompressibleEulerEquationsIntEnergy2D(mass, e_vibr_function, c_vibr_function, T_from_e_function;
     T_ref=1.0, T_min=10.0, T_max=30.0e4, ΔT=1.0,
     e_ref=1.0, min_T_jump_rel=0.5)
     
@@ -45,8 +45,7 @@ using LinearAlgebra
     """
 
     const k_B::Float64 = 1.380649e-23  # J / K
-
-    struct CompressibleEulerEquationsVibrEnergy2D <:
+    struct CompressibleEulerEquationsIntEnergy2D <:
            Trixi.AbstractCompressibleEulerEquations{2, 4}
         mass::Float64
 
@@ -56,6 +55,7 @@ using LinearAlgebra
         ΔT::Float64
         inv_ΔT::Float64
         min_T_jump::Float64
+        T_tol::Float64
 
         e_arr::Vector{Float64}
         c_v_arr::Vector{Float64}
@@ -64,21 +64,20 @@ using LinearAlgebra
         e_ref::Float64
         c_v_ref::Float64
 
-        # tabulated values used to find T(e) via linear interpolation
         e_min::Float64
         e_max::Float64
-        Δe::Float64
-        inv_Δe::Float64
+
         T_arr::Vector{Float64}
+        T_arr_inv::Vector{Float64}
 
         # used to estimate \int c_v(tau) / tau d tau
         int_c_v_over_t_arr::Vector{Float64}
     
-        # the e_vibr_function and c_vibr_function should compute usual dimensional quantities
+        # the e_int_function and c_int_function should compute usual dimensional quantities
         # scaling is governed by T_ref, e_ref, c_ref
-        function CompressibleEulerEquationsVibrEnergy2D(mass, e_vibr_function, c_vibr_function, T_from_e_function;
+        function CompressibleEulerEquationsIntEnergy2D(mass, e_int_function, c_int_function;
                                                         T_ref=1.0, T_min=10.0, T_max=30.0e4, ΔT=1.0,
-                                                        e_ref=1.0, min_T_jump_rel=0.5)
+                                                        e_ref=1.0, min_T_jump_rel=0.5, T_tol=1e-9)
             n_range = trunc(Int, (T_max - T_min) / ΔT) + 1
             T_range = Vector(LinRange(T_min, T_max, n_range))
             
@@ -86,7 +85,7 @@ using LinearAlgebra
 
             @assert abs((T_range[2] - T_range[1]) - ΔT) < 1e-3
 
-            e_tot_from_T = T -> (5.0 / 2.0) * k_B * T / mass  .+ e_vibr_function(T)
+            e_tot_from_T = T -> (3.0 / 2.0) * k_B * T / mass .+ e_int_function(T)
 
             e_arr = zeros(n_range)
             c_v_arr = zeros(n_range)
@@ -94,8 +93,7 @@ using LinearAlgebra
                 e_arr[i] = e_tot_from_T(T_range[i])
             end
 
-            c_v_from_T = T -> (5.0 / 2.0) * k_B / mass .+ c_vibr_function(T)
-
+            c_v_from_T = T -> (3.0 / 2.0) * k_B / mass .+ c_int_function(T)
 
             for i in 1:n_range
                 c_v_arr[i] = c_v_from_T(T_range[i])
@@ -104,55 +102,53 @@ using LinearAlgebra
             e_min = e_arr[1]
             e_max = e_arr[n_range]
 
-            # discretize energy range, will need to find corresponding temperature values at discretization points
-            e_range = Vector(LinRange(e_min, e_max, n_range))
-            Δe = e_range[2] - e_range[1]
-
-            T_arr = zeros(n_range)
-
-            # populate T(e) array
-            for i in 1:n_range
-                T_arr[i] = T_from_e_function(e_range[i], T_range[i])
-            end
-
             int_c_v_over_t_arr = zeros(n_range)
-            s_int_from_T = T -> c_v_from_T(T) / T
-            # we integrate from T_min to T_max using Simpon's rule
+            # s_int_from_T = T -> c_v_from_T(T) / T
+            # we integrate from T_min to T_max using a piecewise_lin_approx(c_v) / T
             # int_{T_min}^{T_i} = int_{T_min}^{T_{i-1}} + int_{T_{i-1}}^{T_{i}}
             for i in 2:n_range
                 T_a = T_range[i-1]
                 T_b = T_range[i]
+                c_v_a = c_v_arr[i-1]
+                c_v_b = c_v_arr[i]
+                # c_v(T) on this interval is c_v_a + (c_v_b - c_v_a) * (T - T_a) / ΔT
+                # ΔT = T_b - T_a
+                # c_v(T) = c_v_a - (c_v_b - c_v_a) * T_a / ΔT + (c_v_b - c_v_a) * T / ΔT
+                # integrating c_v(T) / T from T_a to T_b:
+                # (c_v_a - (c_v_b - c_v_a) * T_a / ΔT) * log(T_b / T_a) + (c_v_b - c_v_a) * (T_b - T_a) / ΔT
+                # = (c_v_a - (c_v_b - c_v_a) * T_a / ΔT) * log(T_b / T_a) + (c_v_b - c_v_a)
 
                 int_c_v_over_t_arr[i] = int_c_v_over_t_arr[i-1]
-                int_c_v_over_t_arr[i] += (ΔT / 6.0) * (s_int_from_T(T_a) + 4 * s_int_from_T(0.5 * (T_a + T_b)) + s_int_from_T(T_b))
+                int_c_v_over_t_arr[i] += (c_v_a - (c_v_b - c_v_a) * T_a / ΔT) * log(T_b / T_a) + (c_v_b - c_v_a)
             end
 
             T_min /= T_ref
             T_max /= T_ref
             ΔT /= T_ref
-            T_arr ./= T_ref
+            T_range ./= T_ref
 
             e_min /= e_ref
             e_max /= e_ref
-            Δe /= e_ref
             e_arr ./= e_ref
 
             c_v_arr ./= c_v_ref
             int_c_v_over_t_arr ./= c_v_ref
             
-            new(mass, T_ref, T_min, T_max, ΔT, 1.0 / ΔT, min_T_jump_rel * ΔT, e_arr, c_v_arr, (k_B / mass) / c_v_ref, e_ref, c_v_ref, e_min, e_max, Δe, 1.0 / Δe,
-                T_arr, int_c_v_over_t_arr)
+            new(mass, T_ref, T_min, T_max, ΔT, 1.0 / ΔT, min_T_jump_rel * ΔT,
+                T_tol,
+                e_arr, c_v_arr, (k_B / mass) / c_v_ref, e_ref, c_v_ref, e_min, e_max,
+                T_range, 1.0 ./ T_range, int_c_v_over_t_arr)
         end
     end
     
-    function varnames(::typeof(cons2cons), ::CompressibleEulerEquationsVibrEnergy2D)
+    function varnames(::typeof(cons2cons), ::CompressibleEulerEquationsIntEnergy2D)
         ("rho", "rho_v1", "rho_v2", "rho_e")
     end
 
-    function Trixi.varnames(::typeof(cons2cons), ::CompressibleEulerEquationsVibrEnergy2D)
+    function Trixi.varnames(::typeof(cons2cons), ::CompressibleEulerEquationsIntEnergy2D)
         ("rho", "rho_v1", "rho_v2", "rho_e")
     end
-    varnames(::typeof(cons2prim), ::CompressibleEulerEquationsVibrEnergy2D) = ("rho", "v1", "v2", "p", "T")
+    varnames(::typeof(cons2prim), ::CompressibleEulerEquationsIntEnergy2D) = ("rho", "v1", "v2", "p", "T")
     
 
     # Set initial conditions at physical location `x` for time `t`
@@ -161,7 +157,7 @@ using LinearAlgebra
     
     A constant initial condition to test free-stream preservation.
     """
-    function initial_condition_constant(x, t, equations::CompressibleEulerEquationsVibrEnergy2D)
+    function initial_condition_constant(x, t, equations::CompressibleEulerEquationsIntEnergy2D)
         rho = 1.0
         rho_v1 = 0.1
         rho_v2 = -0.2
@@ -171,7 +167,7 @@ using LinearAlgebra
     
     """
         boundary_condition_slip_wall(u_inner, normal_direction, x, t, surface_flux_function,
-                                     equations::CompressibleEulerEquationsVibrEnergy2D)
+                                     equations::CompressibleEulerEquationsIntEnergy2D)
     
     Determine the boundary numerical surface flux for a slip wall condition.
     Imposes a zero normal velocity at the wall.
@@ -194,7 +190,7 @@ using LinearAlgebra
     @inline function boundary_condition_slip_wall(u_inner, normal_direction::AbstractVector,
                                                   x, t,
                                                   surface_flux_function,
-                                                  equations::CompressibleEulerEquationsVibrEnergy2D)
+                                                  equations::CompressibleEulerEquationsIntEnergy2D)
         norm_ = norm(normal_direction)
         # Normalize the vector without using `normalize` since we need to multiply by the `norm_` later
         normal = normal_direction / norm_
@@ -241,7 +237,7 @@ using LinearAlgebra
     @inline function boundary_condition_slip_wall(u_inner, orientation,
                                                   direction, x, t,
                                                   surface_flux_function,
-                                                  equations::CompressibleEulerEquationsVibrEnergy2D)
+                                                  equations::CompressibleEulerEquationsIntEnergy2D)
         # get the appropriate normal vector from the orientation
         if orientation == 1
             normal_direction = SVector(1, 0)
@@ -263,7 +259,7 @@ using LinearAlgebra
     @inline function boundary_condition_slip_wall(u_inner, normal_direction::AbstractVector,
                                                   direction, x, t,
                                                   surface_flux_function,
-                                                  equations::CompressibleEulerEquationsVibrEnergy2D)
+                                                  equations::CompressibleEulerEquationsIntEnergy2D)
         # flip sign of normal to make it outward pointing, then flip the sign of the normal flux back
         # to be inward pointing on the -x and -y sides due to the orientation convention used by StructuredMesh
         if isodd(direction)
@@ -280,7 +276,7 @@ using LinearAlgebra
     end
     
     # Calculate 2D flux for a single point
-    @inline function Trixi.flux(u, orientation::Integer, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function Trixi.flux(u, orientation::Integer, equations::CompressibleEulerEquationsIntEnergy2D)
         rho, rho_v1, rho_v2, rho_e = u
         v1 = rho_v1 / rho
         v2 = rho_v2 / rho
@@ -303,7 +299,7 @@ using LinearAlgebra
     # Calculate 2D flux for a single point in the normal direction
     # Note, this directional vector is not normalized
     @inline function Trixi.flux(u, normal_direction::AbstractVector,
-                          equations::CompressibleEulerEquationsVibrEnergy2D)
+                          equations::CompressibleEulerEquationsIntEnergy2D)
         rho_e = last(u)
         rho, v1, v2, p, T = cons2prim(u, equations)
     
@@ -317,17 +313,20 @@ using LinearAlgebra
     end
 
     @inline function flux_oblapenko(u_ll, u_rr, orientation::Integer,
-                                    equations::CompressibleEulerEquationsVibrEnergy2D)
+                                    equations::CompressibleEulerEquationsIntEnergy2D)
         # Unpack left and right state
         rho_ll, v1_ll, v2_ll, p_ll, T_ll = cons2prim(u_ll, equations)
         rho_rr, v1_rr, v2_rr, p_rr, T_rr = cons2prim(u_rr, equations)
-        
+        # gamma_ll = get_gamma(T_ll, equations)
+        # gamma_rr = get_gamma(T_rr, equations)
+    
         # Compute the necessary mean values
         rho_mean = Trixi.ln_mean(rho_ll, rho_rr)
         # Algebraically equivalent to `inv_ln_mean(rho_ll / p_ll, rho_rr / p_rr)`
         # in exact arithmetic since
         #     log((ϱₗ/pₗ) / (ϱᵣ/pᵣ)) / (ϱₗ/pₗ - ϱᵣ/pᵣ)
         #   = pₗ pᵣ log((ϱₗ pᵣ) / (ϱᵣ pₗ)) / (ϱₗ pᵣ - ϱᵣ pₗ)
+        # inv_rho_p_mean = p_ll * p_rr * inv_ln_mean(rho_ll * p_rr, rho_rr * p_ll)
         v1_avg = 0.5 * (v1_ll + v1_rr)
         v2_avg = 0.5 * (v2_ll + v2_rr)
         rho_avg = 0.5 * (rho_ll + rho_rr)
@@ -341,12 +340,13 @@ using LinearAlgebra
 
         velocity_square_avg = 0.5 * (v1_ll^2 + v2_ll^2 + v1_rr^2 + v2_rr^2)
 
+
         T_jump = T_rr - T_ll
 
         if (abs(T_jump) < equations.min_T_jump)
             T_mid = 0.5 * (T_ll + T_rr)
-            cv_Tast_over_Tast = c_v(T_mid, equations) / T_mid
             cv_T_astast = c_v(T_mid, equations)
+            cv_Tast_over_Tast = cv_T_astast / T_mid
         else
             int_cv_T_over_T_ll = entropy_c_v_integral(T_ll, equations)
             int_cv_T_over_T_rr = entropy_c_v_integral(T_rr, equations)
@@ -368,14 +368,13 @@ using LinearAlgebra
             f4 = f1 * ((e_internal_avg - 0.5 * velocity_square_avg) + T_geo^2 * (cv_Tast_over_Tast - inv_T_avg * cv_T_astast)) +
                  f2 * v1_avg + f3 * v2_avg
         end
-    
         return SVector(f1, f2, f3, f4)
     end
     
     # Calculate maximum wave speed for local Lax-Friedrichs-type dissipation as the
     # maximum velocity magnitude plus the maximum speed of sound
     @inline function max_abs_speed_naive(u_ll, u_rr, orientation::Integer,
-                                         equations::CompressibleEulerEquationsVibrEnergy2D)
+                                         equations::CompressibleEulerEquationsIntEnergy2D)
         rho_ll, v1_ll, v2_ll, p_ll, T_ll = cons2prim(u_ll, equations)
         rho_rr, v1_rr, v2_rr, p_rr, T_rr = cons2prim(u_rr, equations)
         gamma_ll = get_gamma(T_ll, equations)
@@ -397,7 +396,7 @@ using LinearAlgebra
     end
     
     @inline function max_abs_speed_naive(u_ll, u_rr, normal_direction::AbstractVector,
-                                         equations::CompressibleEulerEquationsVibrEnergy2D)
+                                         equations::CompressibleEulerEquationsIntEnergy2D)
         rho_ll, v1_ll, v2_ll, p_ll, T_ll = cons2prim(u_ll, equations)
         rho_rr, v1_rr, v2_rr, p_rr, T_rr = cons2prim(u_rr, equations)
         gamma_ll = get_gamma(T_ll, equations)
@@ -422,7 +421,7 @@ using LinearAlgebra
     # maximum velocity magnitude plus the maximum speed of sound
     # better estimate than just naive
     @inline function max_abs_speed_naive_new(u_ll, u_rr, orientation::Integer,
-                                             equations::CompressibleEulerEquationsVibrEnergy2D)
+                                             equations::CompressibleEulerEquationsIntEnergy2D)
         rho_ll, v1_ll, v2_ll, p_ll, T_ll = cons2prim(u_ll, equations)
         rho_rr, v1_rr, v2_rr, p_rr, T_rr = cons2prim(u_rr, equations)
         gamma_ll = get_gamma(T_ll, equations)
@@ -445,7 +444,7 @@ using LinearAlgebra
     end
     
     @inline function max_abs_speed_naive_new(u_ll, u_rr, normal_direction::AbstractVector,
-                                             equations::CompressibleEulerEquationsVibrEnergy2D)
+                                             equations::CompressibleEulerEquationsIntEnergy2D)
         rho_ll, v1_ll, v2_ll, p_ll, T_ll = cons2prim(u_ll, equations)
         rho_rr, v1_rr, v2_rr, p_rr, T_rr = cons2prim(u_rr, equations)
         gamma_ll = get_gamma(T_ll, equations)
@@ -469,7 +468,7 @@ using LinearAlgebra
     
     # Called inside `FluxRotated` in `numerical_fluxes.jl` so the direction
     # has been normalized prior to this rotation of the state vector
-    @inline function Trixi.rotate_to_x(u, normal_vector, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function Trixi.rotate_to_x(u, normal_vector, equations::CompressibleEulerEquationsIntEnergy2D)
         # cos and sin of the angle between the x-axis and the normalized normal_vector are
         # the normalized vector's x and y coordinates respectively (see unit circle).
         c = normal_vector[1]
@@ -491,7 +490,7 @@ using LinearAlgebra
     # Called inside `FluxRotated` in `numerical_fluxes.jl` so the direction
     # has been normalized prior to this back-rotation of the state vector
     @inline function Trixi.rotate_from_x(u, normal_vector,
-                                   equations::CompressibleEulerEquationsVibrEnergy2D)
+                                   equations::CompressibleEulerEquationsIntEnergy2D)
         # cos and sin of the angle between the x-axis and the normalized normal_vector are
         # the normalized vector's x and y coordinates respectively (see unit circle).
         c = normal_vector[1]
@@ -510,7 +509,7 @@ using LinearAlgebra
                        u[4])
     end
     
-    @inline function max_abs_speeds(u, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function max_abs_speeds(u, equations::CompressibleEulerEquationsIntEnergy2D)
         rho, v1, v2, p, gamma = cons2prim(u, equations)
         c = sqrt(gamma * p / rho)
     
@@ -518,7 +517,7 @@ using LinearAlgebra
     end
     
     # Convert conservative variables to primitive
-    @inline function Trixi.cons2prim(u, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function Trixi.cons2prim(u, equations::CompressibleEulerEquationsIntEnergy2D)
         rho, rho_v1, rho_v2, rho_e = u
 
         v1 = rho_v1 / rho
@@ -531,18 +530,18 @@ using LinearAlgebra
         return SVector(rho, v1, v2, p, T)
     end
 
-    # @inline function Trixi.get_gamma(T, equations::CompressibleEulerEquationsVibrEnergy2D)
-    #     c_v_val = c_v(T, equations)
-    #     return (c_v_val + 1.0) / c_v_val
-    # end
+    # add dissipation to the flux
+    function FluxOblapenkoDissipative(max_abs_speed = max_abs_speed_naive_new)
+        FluxPlusDissipation(FluxRotated(flux_oblapenko), DissipationLocalLaxFriedrichs(max_abs_speed))
+    end
 
-    @inline function get_gamma(T, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function get_gamma(T, equations::CompressibleEulerEquationsIntEnergy2D)
         c_v_val = c_v(T, equations)
         return (c_v_val + 1.0) / c_v_val
     end
     
     # Convert conservative variables to entropy
-    @inline function Trixi.cons2entropy(u, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function Trixi.cons2entropy(u, equations::CompressibleEulerEquationsIntEnergy2D)
         rho, v1, v2, p, T = cons2prim(u, equations)
         
         v_square = v1^2 + v2^2
@@ -558,7 +557,7 @@ using LinearAlgebra
         return SVector(w1, w2, w3, w4)
     end
     
-    @inline function entropy2cons(w, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function entropy2cons(w, equations::CompressibleEulerEquationsIntEnergy2D)
         # See Hughes, Franca, Mallet (1986) A new finite element formulation for CFD
         # [DOI: 10.1016/0045-7825(86)90127-1](https://doi.org/10.1016/0045-7825(86)90127-1)
         # TODO
@@ -566,7 +565,7 @@ using LinearAlgebra
     end
     
     # Convert primitive to conservative variables
-    @inline function prim2cons(prim, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function prim2cons(prim, equations::CompressibleEulerEquationsIntEnergy2D)
         rho, v1, v2, p, T = prim
         rho_v1 = rho * v1
         rho_v2 = rho * v2
@@ -574,65 +573,98 @@ using LinearAlgebra
         return SVector(rho, rho_v1, rho_v2, rho_e)
     end
 
-    @inline function energy(T, equations::CompressibleEulerEquationsVibrEnergy2D)
-        fracpos = (T - equations.T_min) * equations.inv_ΔT
+    @inline @inbounds function energy(T, equations::CompressibleEulerEquationsIntEnergy2D)
+        fracpos = (T - equations.T_min) * equations.inv_ΔT #  / equations.ΔT
         index_lower = floor(Int, fracpos)
         fracpos -= index_lower
         index_lower += 1
     
         return equations.e_arr[index_lower] * (1.0 - fracpos) + fracpos * equations.e_arr[index_lower + 1]
     end
-    
-    @inline function c_v(T, equations::CompressibleEulerEquationsVibrEnergy2D)
-        fracpos = (T - equations.T_min) * equations.inv_ΔT
-        index_lower = floor(Int, fracpos)
-        fracpos -= index_lower
-        index_lower += 1
-    
+
+    @inline @inbounds function c_v(index_lower, fracpos, equations::CompressibleEulerEquationsIntEnergy2D)
         return equations.c_v_arr[index_lower] * (1.0 - fracpos) + fracpos * equations.c_v_arr[index_lower + 1]
     end
     
-    @inline function entropy_c_v_integral(T, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline @inbounds function c_v(T, equations::CompressibleEulerEquationsIntEnergy2D)
         fracpos = (T - equations.T_min) * equations.inv_ΔT
         index_lower = floor(Int, fracpos)
         fracpos -= index_lower
         index_lower += 1
     
-        return equations.int_c_v_over_t_arr[index_lower] * (1.0 - fracpos) + fracpos * equations.int_c_v_over_t_arr[index_lower + 1]
+        return c_v(index_lower, fracpos, equations)
+    end
+
+    @inline @inbounds function entropy_c_v_integral(index_lower, fracpos, T_b, equations::CompressibleEulerEquationsIntEnergy2D)
+        T_a = equations.T_arr[index_lower]
+        T_a_inv = equations.T_arr_inv[index_lower]
+
+        # integrate (linear approximation of c_v(T)) / T from closest_T to T
+        c_v_b = c_v(index_lower, fracpos, equations)  # value of c_v at T
+        c_v_a = equations.c_v_arr[index_lower]  # value of c_v at closest_T
+        integrate_part = (c_v_a - (c_v_b - c_v_a) * T_a * equations.inv_ΔT) * log(T_b * T_a_inv) + (c_v_b - c_v_a)
+        return equations.int_c_v_over_t_arr[index_lower] + integrate_part
     end
     
-    @inline function Trixi.temperature(e, equations::CompressibleEulerEquationsVibrEnergy2D)
-        if (e < equations.e_min)
-            return equations.T_min
-        end
-
-        fracpos = (e - equations.e_min) * equations.inv_Δe
+    @inline @inbounds function entropy_c_v_integral(T, equations::CompressibleEulerEquationsIntEnergy2D)
+        fracpos = (T - equations.T_min) * equations.inv_ΔT
         index_lower = floor(Int, fracpos)
         fracpos -= index_lower
         index_lower += 1
         
-        return equations.T_arr[index_lower] * (1.0 - fracpos) + fracpos * equations.T_arr[index_lower + 1]
-    end
-
-    @inline function temperature(e, equations::CompressibleEulerEquationsVibrEnergy2D)
-        return Trixi.temperature(e, equations)
+        return entropy_c_v_integral(index_lower, fracpos, T, equations::CompressibleEulerEquationsIntEnergy2D)
+        # return equations.int_c_v_over_t_arr[index_lower] * (1.0 - fracpos) + fracpos * equations.int_c_v_over_t_arr[index_lower + 1]
+        
     end
     
-    @inline function Trixi.density(u, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function temperature(T0, e, equations::CompressibleEulerEquationsIntEnergy2D)
+        T = T0
+
+        if (T < equations.T_min)
+            T = 1.0001 * equations.T_min
+        elseif (T > equations.T_max)
+            T = 0.9999 * equations.T_max
+        end
+
+        fx = energy(T, equations) - e
+        # iter = 0
+
+        mintol = equations.T_tol * e + equations.T_tol
+
+        while abs(fx) > mintol # && iter < 1000
+            T -= fx / c_v(T, equations)   # Iteration
+
+            fx = energy(T, equations) - e  
+            # iter += 1
+        end
+        return T
+    end
+
+    
+    @inline function temperature(e_internal, equations::CompressibleEulerEquationsIntEnergy2D)
+        if (e_internal < equations.e_min)
+            return equations.T_min
+        elseif (e_internal > equations.e_max)
+            return equations.T_max
+        end
+
+        return temperature(0.66 * e_internal, e_internal, equations)
+    end
+
+    @inline function density(u, equations::CompressibleEulerEquationsIntEnergy2D)
         rho = u[1]
         return rho
     end
     
-    @inline function Trixi.pressure(u, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function Trixi.pressure(u, equations::CompressibleEulerEquationsIntEnergy2D)
         rho, rho_v1, rho_v2, rho_e = u
         e_internal = (rho_e - 0.5 * (rho_v1^2 + rho_v2^2) / rho) / rho
-
         T = temperature(e_internal, equations)
         p = rho * T
         return p
     end
     
-    @inline function Trixi.density_pressure(u, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function Trixi.density_pressure(u, equations::CompressibleEulerEquationsIntEnergy2D)
         rho, rho_v1, rho_v2, rho_e = u
     
         e_internal = (rho_e - 0.5 * (rho_v1^2 + rho_v2^2) / rho) / rho
@@ -641,9 +673,9 @@ using LinearAlgebra
         return rho * p
     end
     
-    
+
     # Calculate thermodynamic entropy for a conservative state `cons`
-    @inline function entropy_thermodynamic(cons, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function entropy_thermodynamic(cons, equations::CompressibleEulerEquationsIntEnergy2D)
         # Pressure
         # p = (equations.gamma - 1) * (cons[4] - 1 / 2 * (cons[2]^2 + cons[3]^2) / cons[1])
     
@@ -651,39 +683,39 @@ using LinearAlgebra
         # s = log(p) - equations.gamma * log(cons[1])
     
         e = energy_internal_without_rho(cons, equations)  # get e
-        T = temperature(e, equations::CompressibleEulerEquationsVibrEnergy2D)
+        T = temperature(e, equations::CompressibleEulerEquationsIntEnergy2D)
         s = entropy_c_v_integral(T, equations) - log(cons[1])
         return s
     end
     
     # Calculate mathematical entropy for a conservative state `cons`
-    @inline function entropy_math(cons, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function entropy_math(cons, equations::CompressibleEulerEquationsIntEnergy2D)
         # Mathematical entropy
         S = -entropy_thermodynamic(cons, equations) * cons[1]
         return S
     end
     
     # Default entropy is the mathematical entropy
-    @inline function entropy(cons, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function entropy(cons, equations::CompressibleEulerEquationsIntEnergy2D)
         entropy_math(cons, equations)
     end
     
     # Calculate total energy for a conservative state `cons`
-    @inline energy_total(cons, ::CompressibleEulerEquationsVibrEnergy2D) = cons[4]
+    @inline energy_total(cons, ::CompressibleEulerEquationsIntEnergy2D) = cons[4]
     
     # Calculate kinetic energy for a conservative state `cons`
-    @inline function energy_kinetic(u, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function energy_kinetic(u, equations::CompressibleEulerEquationsIntEnergy2D)
         rho, rho_v1, rho_v2, rho_e = u
         return (rho_v1^2 + rho_v2^2) / (2 * rho)
     end
     
     # Calculate internal energy for a conservative state `cons`
-    @inline function energy_internal(cons, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function energy_internal(cons, equations::CompressibleEulerEquationsIntEnergy2D)
         # this returns rho e_internal [J/m^3]
         return energy_total(cons, equations) - energy_kinetic(cons, equations)
     end
 
-    @inline function energy_internal_without_rho(cons, equations::CompressibleEulerEquationsVibrEnergy2D)
+    @inline function energy_internal_without_rho(cons, equations::CompressibleEulerEquationsIntEnergy2D)
         # # this returns e_internal [J/kg]
         return return energy_internal(cons, equations) / cons[1]
     end
