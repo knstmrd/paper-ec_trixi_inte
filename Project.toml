@@ -1,7 +1,7 @@
 name = "Trixi_neq"
 uuid = "d7fa6f5d-3ea3-4ccd-908b-21253cdb16f3"
 authors = ["Georgii Oblapenko <oblapenko@acom.rwth-aachen.de>"]
-version = "0.1.5"
+version = "0.2.0"
 
 [deps]
 MuladdMacro = "46d2c3a1-f734-5fdb-9937-b9b9aeba4221"
